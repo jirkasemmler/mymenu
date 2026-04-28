@@ -28,6 +28,15 @@ export interface MealPlanItem {
 export const DAY_NAMES = ["Po", "Út", "St", "Čt", "Pá", "So", "Ne"];
 export const MEAL_TYPES = ["oběd", "večeře"] as const;
 
+export interface MealIngredient {
+  id: number;
+  meal_id: number;
+  name: string;
+  amount: number | null;
+  unit: string | null;
+  created_at: string;
+}
+
 export const SUGGESTED_TAGS = [
   "maso",
   "bezmasé",

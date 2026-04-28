@@ -3,3 +3,8 @@
 @theme inline {
   --font-sans: var(--font-geist-sans);
 }
+
+body {
+  background: #0a0a0a;
+  color: #e5e5e5;
+}

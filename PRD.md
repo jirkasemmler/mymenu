@@ -26,9 +26,10 @@ Rodič, který spravuje jídelníček pro rodinu — zadává jídla, generuje a
 - Zobrazení aktuálního týdenního plánu — přehledně, mobile-first
 - Ruční výměna jídla v plánu (swap za jiné z katalogu)
 - Regenerace konkrétního dne/jídla (zamknuté sloty se nepřepisují)
+- Suroviny u jídel (název, množství, jednotka)
+- Nákupní seznam z týdenního plánu (agregace surovin, odškrtávání)
 
 ### Out of scope
-- Nákupní seznam z plánu
 - Přihlašování / multi-user (zatím single household)
 - Recepty / postup přípravy
 - Nutriční informace
