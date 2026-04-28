@@ -5,12 +5,15 @@ import { createClient } from "@/lib/supabase";
 import { Meal, MealPlanItem, DAY_NAMES, MEAL_TYPES } from "@/lib/types";
 import { generateWeekPlan, regenerateSlot, getCurrentMonday } from "@/lib/planner";
 
+const supabase = createClient();
+
 export default function PlanPage() {
-  const supabase = createClient();
   const [meals, setMeals] = useState<Meal[]>([]);
   const [planItems, setPlanItems] = useState<MealPlanItem[]>([]);
   const [planId, setPlanId] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [generating, setGenerating] = useState(false);
   const [swapSlot, setSwapSlot] = useState<{ day: number; meal_type: string } | null>(null);
 
   const weekStart = getCurrentMonday();
@@ -26,7 +29,15 @@ export default function PlanPage() {
         .single(),
     ]);
 
+    if (mealsRes.error) {
+      console.error("Chyba při načítání jídel:", mealsRes.error);
+      setError("Nepodařilo se načíst data. Zkontroluj připojení k Supabase.");
+      setLoading(false);
+      return;
+    }
+
     setMeals(mealsRes.data || []);
+    setError(null);
 
     if (planRes.data) {
       setPlanId(planRes.data.id);
@@ -46,30 +57,40 @@ export default function PlanPage() {
       return;
     }
 
-    // Zamknuté položky zůstanou
+    setGenerating(true);
+
     const locked = planItems.filter((item) => item.locked);
     const newItems = generateWeekPlan(meals, locked);
 
-    // Smaž starý plán (pokud existuje)
     if (planId) {
-      await supabase.from("meal_plan_items").delete().eq("meal_plan_id", planId).eq("locked", false);
+      const { error } = await supabase.from("meal_plan_items").delete().eq("meal_plan_id", planId).eq("locked", false);
+      if (error) {
+        console.error("Chyba při mazání starého plánu:", error);
+        alert("Nepodařilo se přegenerovat plán.");
+        setGenerating(false);
+        return;
+      }
     }
 
-    // Vytvoř plán pokud neexistuje
     let currentPlanId = planId;
     if (!currentPlanId) {
-      const { data } = await supabase
+      const { data, error } = await supabase
         .from("meal_plans")
         .insert({ week_start: weekStart })
         .select()
         .single();
-      currentPlanId = data!.id;
+      if (error || !data) {
+        console.error("Chyba při vytváření plánu:", error);
+        alert("Nepodařilo se vytvořit plán.");
+        setGenerating(false);
+        return;
+      }
+      currentPlanId = data.id;
       setPlanId(currentPlanId);
     }
 
-    // Vlož nové položky
     if (newItems.length > 0) {
-      await supabase.from("meal_plan_items").insert(
+      const { error } = await supabase.from("meal_plan_items").insert(
         newItems.map((item) => ({
           meal_plan_id: currentPlanId,
           meal_id: item.meal_id,
@@ -78,8 +99,15 @@ export default function PlanPage() {
           locked: false,
         }))
       );
+      if (error) {
+        console.error("Chyba při ukládání položek plánu:", error);
+        alert("Nepodařilo se uložit plán.");
+        setGenerating(false);
+        return;
+      }
     }
 
+    setGenerating(false);
     fetchData();
   }
 
@@ -89,10 +117,14 @@ export default function PlanPage() {
 
     const item = planItems.find((p) => p.day === day && p.meal_type === mealType);
     if (item) {
-      await supabase
+      const { error } = await supabase
         .from("meal_plan_items")
         .update({ meal_id: newMealId, locked: false })
         .eq("id", item.id);
+      if (error) {
+        console.error("Chyba při regeneraci slotu:", error);
+        return;
+      }
     }
 
     fetchData();
@@ -101,20 +133,28 @@ export default function PlanPage() {
   async function handleSwap(day: number, mealType: string, newMealId: number) {
     const item = planItems.find((p) => p.day === day && p.meal_type === mealType);
     if (item) {
-      await supabase
+      const { error } = await supabase
         .from("meal_plan_items")
         .update({ meal_id: newMealId, locked: true })
         .eq("id", item.id);
+      if (error) {
+        console.error("Chyba při výměně jídla:", error);
+        return;
+      }
     }
     setSwapSlot(null);
     fetchData();
   }
 
   async function toggleLock(item: MealPlanItem) {
-    await supabase
+    const { error } = await supabase
       .from("meal_plan_items")
       .update({ locked: !item.locked })
       .eq("id", item.id);
+    if (error) {
+      console.error("Chyba při zamykání/odemykání:", error);
+      return;
+    }
     fetchData();
   }
 
@@ -123,21 +163,33 @@ export default function PlanPage() {
   }
 
   if (loading) {
-    return <p className="text-gray-500">Načítám...</p>;
+    return <p className="text-gray-400">Načítám...</p>;
+  }
+
+  if (error) {
+    return (
+      <div className="bg-red-900/20 border border-red-800 rounded-lg p-4 text-red-300">
+        <p>{error}</p>
+        <button onClick={fetchData} className="mt-2 text-sm underline text-red-400">
+          Zkusit znovu
+        </button>
+      </div>
+    );
   }
 
   return (
     <div>
       <div className="flex items-center justify-between mb-6">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">Týdenní plán</h1>
+          <h1 className="text-2xl font-bold text-white">Týdenní plán</h1>
           <p className="text-sm text-gray-500">Týden od {weekStart}</p>
         </div>
         <button
           onClick={handleGenerate}
-          className="px-4 py-2 bg-gray-900 text-white rounded-lg text-sm hover:bg-gray-700 transition-colors"
+          disabled={generating}
+          className="px-4 py-2 bg-white text-black rounded-lg text-sm hover:bg-gray-200 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
         >
-          {planItems.length > 0 ? "🔄 Přegenerovat" : "✨ Vygenerovat plán"}
+          {generating ? "Generuji..." : planItems.length > 0 ? "🔄 Přegenerovat" : "✨ Vygenerovat plán"}
         </button>
       </div>
 
@@ -146,7 +198,7 @@ export default function PlanPage() {
           <p className="text-lg mb-2">Nejdřív přidej jídla</p>
           <p className="text-sm">
             Jdi do{" "}
-            <a href="/jidla" className="underline">
+            <a href="/jidla" className="underline text-gray-300">
               katalogu jídel
             </a>{" "}
             a přidej co umíte vařit.
@@ -160,11 +212,11 @@ export default function PlanPage() {
       ) : (
         <div className="space-y-2">
           {DAY_NAMES.map((dayName, dayIndex) => (
-            <div key={dayIndex} className="bg-white rounded-lg border border-gray-200 overflow-hidden">
-              <div className="bg-gray-50 px-4 py-2 border-b border-gray-200">
-                <span className="font-medium text-gray-900">{dayName}</span>
+            <div key={dayIndex} className="bg-[#111] rounded-lg border border-gray-800 overflow-hidden">
+              <div className="bg-[#1a1a1a] px-4 py-2 border-b border-gray-800">
+                <span className="font-medium text-white">{dayName}</span>
               </div>
-              <div className="divide-y divide-gray-100">
+              <div className="divide-y divide-gray-800/50">
                 {MEAL_TYPES.map((mealType) => {
                   const item = getMealForSlot(dayIndex, mealType);
                   const meal = item?.meals;
@@ -174,18 +226,18 @@ export default function PlanPage() {
                   return (
                     <div key={mealType} className="px-4 py-3 flex items-center justify-between">
                       <div className="flex items-center gap-3 min-w-0">
-                        <span className="text-xs text-gray-400 w-12 shrink-0">
+                        <span className="text-xs text-gray-500 w-12 shrink-0">
                           {mealType}
                         </span>
                         {meal ? (
                           <div className="min-w-0">
-                            <span className="text-gray-900">{meal.name}</span>
+                            <span className="text-gray-200">{meal.name}</span>
                             {meal.tags.length > 0 && (
                               <div className="flex gap-1 mt-0.5">
                                 {meal.tags.map((tag) => (
                                   <span
                                     key={tag}
-                                    className="px-1.5 py-0.5 bg-gray-100 text-gray-500 rounded text-[10px]"
+                                    className="px-1.5 py-0.5 bg-[#222] text-gray-500 rounded text-[10px]"
                                   >
                                     {tag}
                                   </span>
@@ -194,7 +246,7 @@ export default function PlanPage() {
                             )}
                           </div>
                         ) : (
-                          <span className="text-gray-300">—</span>
+                          <span className="text-gray-700">—</span>
                         )}
                       </div>
                       {item && (
@@ -234,7 +286,7 @@ export default function PlanPage() {
               {/* Swap picker */}
               {swapSlot &&
                 (swapSlot.day === dayIndex) && (
-                  <div className="px-4 py-3 bg-gray-50 border-t border-gray-200">
+                  <div className="px-4 py-3 bg-[#1a1a1a] border-t border-gray-800">
                     <p className="text-xs text-gray-500 mb-2">Vyber náhradní jídlo:</p>
                     <div className="flex flex-wrap gap-1">
                       {meals
@@ -248,7 +300,7 @@ export default function PlanPage() {
                           <button
                             key={m.id}
                             onClick={() => handleSwap(dayIndex, swapSlot.meal_type, m.id)}
-                            className="px-2 py-1 bg-white border border-gray-200 rounded text-sm hover:border-gray-400 transition-colors"
+                            className="px-2 py-1 bg-[#222] border border-gray-700 rounded text-sm text-gray-300 hover:border-gray-500 transition-colors"
                           >
                             {m.name}
                           </button>

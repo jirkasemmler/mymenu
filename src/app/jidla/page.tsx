@@ -4,26 +4,35 @@ import { useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase";
 import { Meal, SUGGESTED_TAGS } from "@/lib/types";
 
+const supabase = createClient();
+
 export default function JidlaPage() {
-  const supabase = createClient();
   const [meals, setMeals] = useState<Meal[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [showForm, setShowForm] = useState(false);
   const [editingMeal, setEditingMeal] = useState<Meal | null>(null);
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
+  const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
     fetchMeals();
   }, []);
 
   async function fetchMeals() {
-    const { data } = await supabase
+    const { data, error } = await supabase
       .from("meals")
       .select("*")
       .order("created_at", { ascending: false });
-    setMeals(data || []);
+    if (error) {
+      console.error("Chyba při načítání jídel:", error);
+      setError("Nepodařilo se načíst jídla. Zkontroluj připojení k Supabase.");
+    } else {
+      setMeals(data || []);
+      setError(null);
+    }
     setLoading(false);
   }
 
@@ -51,41 +60,72 @@ export default function JidlaPage() {
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    if (!name.trim()) return;
+    if (!name.trim() || submitting) return;
+
+    setSubmitting(true);
 
     if (editingMeal) {
-      await supabase
+      const { error } = await supabase
         .from("meals")
         .update({ name: name.trim(), description: description.trim() || null, tags: selectedTags })
         .eq("id", editingMeal.id);
+      if (error) {
+        console.error("Chyba při úpravě jídla:", error);
+        alert("Nepodařilo se uložit změny.");
+        setSubmitting(false);
+        return;
+      }
     } else {
-      await supabase
+      const { error } = await supabase
         .from("meals")
         .insert({ name: name.trim(), description: description.trim() || null, tags: selectedTags });
+      if (error) {
+        console.error("Chyba při přidávání jídla:", error);
+        alert("Nepodařilo se přidat jídlo.");
+        setSubmitting(false);
+        return;
+      }
     }
 
+    setSubmitting(false);
     resetForm();
     fetchMeals();
   }
 
   async function handleDelete(id: number) {
     if (!confirm("Smazat jídlo?")) return;
-    await supabase.from("meals").delete().eq("id", id);
+    const { error } = await supabase.from("meals").delete().eq("id", id);
+    if (error) {
+      console.error("Chyba při mazání jídla:", error);
+      alert("Nepodařilo se smazat jídlo.");
+      return;
+    }
     fetchMeals();
   }
 
   if (loading) {
-    return <p className="text-gray-500">Načítám...</p>;
+    return <p className="text-gray-400">Načítám...</p>;
+  }
+
+  if (error) {
+    return (
+      <div className="bg-red-900/20 border border-red-800 rounded-lg p-4 text-red-300">
+        <p>{error}</p>
+        <button onClick={fetchMeals} className="mt-2 text-sm underline text-red-400">
+          Zkusit znovu
+        </button>
+      </div>
+    );
   }
 
   return (
     <div>
       <div className="flex items-center justify-between mb-6">
-        <h1 className="text-2xl font-bold text-gray-900">Katalog jídel</h1>
+        <h1 className="text-2xl font-bold text-white">Katalog jídel</h1>
         {!showForm && (
           <button
             onClick={() => setShowForm(true)}
-            className="px-4 py-2 bg-gray-900 text-white rounded-lg text-sm hover:bg-gray-700 transition-colors"
+            className="px-4 py-2 bg-white text-black rounded-lg text-sm hover:bg-gray-200 transition-colors"
           >
             + Přidat jídlo
           </button>
@@ -93,30 +133,30 @@ export default function JidlaPage() {
       </div>
 
       {showForm && (
-        <form onSubmit={handleSubmit} className="bg-white rounded-lg border border-gray-200 p-4 mb-6">
+        <form onSubmit={handleSubmit} className="bg-[#111] rounded-lg border border-gray-800 p-4 mb-6">
           <div className="mb-3">
-            <label className="block text-sm font-medium text-gray-700 mb-1">Název</label>
+            <label className="block text-sm font-medium text-gray-300 mb-1">Název</label>
             <input
               type="text"
               value={name}
               onChange={(e) => setName(e.target.value)}
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-gray-900"
+              className="w-full px-3 py-2 bg-[#1a1a1a] border border-gray-700 rounded-lg text-sm text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-white"
               placeholder="Např. Špagety bolognese"
               autoFocus
             />
           </div>
           <div className="mb-3">
-            <label className="block text-sm font-medium text-gray-700 mb-1">Popis (volitelné)</label>
+            <label className="block text-sm font-medium text-gray-300 mb-1">Popis (volitelné)</label>
             <input
               type="text"
               value={description}
               onChange={(e) => setDescription(e.target.value)}
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-gray-900"
+              className="w-full px-3 py-2 bg-[#1a1a1a] border border-gray-700 rounded-lg text-sm text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-white"
               placeholder="Krátký popis..."
             />
           </div>
           <div className="mb-4">
-            <label className="block text-sm font-medium text-gray-700 mb-2">Tagy</label>
+            <label className="block text-sm font-medium text-gray-300 mb-2">Tagy</label>
             <div className="flex flex-wrap gap-2">
               {SUGGESTED_TAGS.map((tag) => (
                 <button
@@ -125,8 +165,8 @@ export default function JidlaPage() {
                   onClick={() => toggleTag(tag)}
                   className={`px-3 py-1 rounded-full text-xs transition-colors ${
                     selectedTags.includes(tag)
-                      ? "bg-gray-900 text-white"
-                      : "bg-gray-100 text-gray-600 hover:bg-gray-200"
+                      ? "bg-white text-black"
+                      : "bg-[#222] text-gray-400 hover:bg-[#333]"
                   }`}
                 >
                   {tag}
@@ -137,14 +177,16 @@ export default function JidlaPage() {
           <div className="flex gap-2">
             <button
               type="submit"
-              className="px-4 py-2 bg-gray-900 text-white rounded-lg text-sm hover:bg-gray-700 transition-colors"
+              disabled={submitting}
+              className="px-4 py-2 bg-white text-black rounded-lg text-sm hover:bg-gray-200 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              {editingMeal ? "Uložit" : "Přidat"}
+              {submitting ? "Ukládám..." : editingMeal ? "Uložit" : "Přidat"}
             </button>
             <button
               type="button"
               onClick={resetForm}
-              className="px-4 py-2 bg-gray-100 text-gray-600 rounded-lg text-sm hover:bg-gray-200 transition-colors"
+              disabled={submitting}
+              className="px-4 py-2 bg-[#222] text-gray-400 rounded-lg text-sm hover:bg-[#333] transition-colors disabled:opacity-50"
             >
               Zrušit
             </button>
@@ -162,19 +204,19 @@ export default function JidlaPage() {
           {meals.map((meal) => (
             <div
               key={meal.id}
-              className="bg-white rounded-lg border border-gray-200 p-4 flex items-center justify-between"
+              className="bg-[#111] rounded-lg border border-gray-800 p-4 flex items-center justify-between"
             >
               <div>
-                <div className="font-medium text-gray-900">{meal.name}</div>
+                <div className="font-medium text-white">{meal.name}</div>
                 {meal.description && (
-                  <div className="text-sm text-gray-500">{meal.description}</div>
+                  <div className="text-sm text-gray-400">{meal.description}</div>
                 )}
                 {meal.tags.length > 0 && (
                   <div className="flex gap-1 mt-1">
                     {meal.tags.map((tag) => (
                       <span
                         key={tag}
-                        className="px-2 py-0.5 bg-gray-100 text-gray-600 rounded-full text-xs"
+                        className="px-2 py-0.5 bg-[#222] text-gray-400 rounded-full text-xs"
                       >
                         {tag}
                       </span>
@@ -185,13 +227,13 @@ export default function JidlaPage() {
               <div className="flex gap-2 ml-4 shrink-0">
                 <button
                   onClick={() => startEdit(meal)}
-                  className="text-sm text-gray-400 hover:text-gray-600"
+                  className="text-sm text-gray-500 hover:text-gray-300"
                 >
                   ✏️
                 </button>
                 <button
                   onClick={() => handleDelete(meal.id)}
-                  className="text-sm text-gray-400 hover:text-red-500"
+                  className="text-sm text-gray-500 hover:text-red-400"
                 >
                   🗑️
                 </button>
