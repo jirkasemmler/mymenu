@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase";
-import { Meal, SUGGESTED_TAGS } from "@/lib/types";
+import { Meal, MealIngredient, SUGGESTED_TAGS } from "@/lib/types";
 
 const supabase = createClient();
 
@@ -16,6 +16,14 @@ export default function JidlaPage() {
   const [description, setDescription] = useState("");
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
   const [submitting, setSubmitting] = useState(false);
+
+  // Stav pro správu surovin
+  const [ingredientsMealId, setIngredientsMealId] = useState<number | null>(null);
+  const [ingredients, setIngredients] = useState<MealIngredient[]>([]);
+  const [ingName, setIngName] = useState("");
+  const [ingAmount, setIngAmount] = useState("");
+  const [ingUnit, setIngUnit] = useState("");
+  const [ingSubmitting, setIngSubmitting] = useState(false);
 
   useEffect(() => {
     fetchMeals();
@@ -101,6 +109,65 @@ export default function JidlaPage() {
       return;
     }
     fetchMeals();
+  }
+
+  async function openIngredients(mealId: number) {
+    if (ingredientsMealId === mealId) {
+      setIngredientsMealId(null);
+      setIngredients([]);
+      return;
+    }
+    // Reset formuláře surovin při přepnutí na jiné jídlo
+    setIngName("");
+    setIngAmount("");
+    setIngUnit("");
+    setIngredientsMealId(mealId);
+    const { data, error } = await supabase
+      .from("meal_ingredients")
+      .select("*")
+      .eq("meal_id", mealId)
+      .order("created_at", { ascending: true });
+    if (error) {
+      console.error("Chyba při načítání surovin:", error);
+      setIngredients([]);
+    } else {
+      setIngredients(data || []);
+    }
+  }
+
+  async function addIngredient(mealId: number) {
+    if (!ingName.trim() || ingSubmitting) return;
+    setIngSubmitting(true);
+    const parsedAmount = ingAmount ? parseFloat(ingAmount) : null;
+    const safeAmount = parsedAmount !== null && isNaN(parsedAmount) ? null : parsedAmount;
+    const { data: inserted, error } = await supabase.from("meal_ingredients").insert({
+      meal_id: mealId,
+      name: ingName.trim(),
+      amount: safeAmount,
+      unit: ingUnit.trim() || null,
+    }).select().single();
+    if (error) {
+      console.error("Chyba při přidávání suroviny:", error);
+      alert("Nepodařilo se přidat surovinu.");
+    } else {
+      setIngName("");
+      setIngAmount("");
+      setIngUnit("");
+      // Appendni vloženou surovinu do stavu místo druhého fetche
+      if (inserted) {
+        setIngredients((prev) => [...prev, inserted]);
+      }
+    }
+    setIngSubmitting(false);
+  }
+
+  async function deleteIngredient(mealId: number, ingredientId: number) {
+    const { error } = await supabase.from("meal_ingredients").delete().eq("id", ingredientId);
+    if (error) {
+      console.error("Chyba při mazání suroviny:", error);
+      return;
+    }
+    setIngredients((prev) => prev.filter((i) => i.id !== ingredientId));
   }
 
   if (loading) {
@@ -204,9 +271,9 @@ export default function JidlaPage() {
           {meals.map((meal) => (
             <div
               key={meal.id}
-              className="bg-[#111] rounded-lg border border-gray-800 p-4 flex items-center justify-between"
+              className="bg-[#111] rounded-lg border border-gray-800 p-4 flex flex-wrap items-center justify-between"
             >
-              <div>
+              <div className="min-w-0">
                 <div className="font-medium text-white">{meal.name}</div>
                 {meal.description && (
                   <div className="text-sm text-gray-400">{meal.description}</div>
@@ -226,6 +293,13 @@ export default function JidlaPage() {
               </div>
               <div className="flex gap-2 ml-4 shrink-0">
                 <button
+                  onClick={() => openIngredients(meal.id)}
+                  className="text-sm text-gray-500 hover:text-gray-300"
+                  title="Suroviny"
+                >
+                  🥕
+                </button>
+                <button
                   onClick={() => startEdit(meal)}
                   className="text-sm text-gray-500 hover:text-gray-300"
                 >
@@ -238,6 +312,65 @@ export default function JidlaPage() {
                   🗑️
                 </button>
               </div>
+
+              {/* Správa surovin */}
+              {ingredientsMealId === meal.id && (
+                <div className="w-full mt-3 pt-3 border-t border-gray-800">
+                  <p className="text-xs text-gray-500 mb-2">Suroviny</p>
+                  {ingredients.length > 0 && (
+                    <div className="space-y-1 mb-3">
+                      {ingredients.map((ing) => (
+                        <div key={ing.id} className="flex items-center justify-between text-sm">
+                          <span className="text-gray-300">
+                            {ing.name}
+                            {ing.amount != null && (
+                              <span className="text-gray-500 ml-1">
+                                {ing.amount}{ing.unit ? ` ${ing.unit}` : ""}
+                              </span>
+                            )}
+                          </span>
+                          <button
+                            onClick={() => deleteIngredient(meal.id, ing.id)}
+                            className="text-xs text-gray-600 hover:text-red-400"
+                          >
+                            ✕
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  <div className="flex gap-2">
+                    <input
+                      type="text"
+                      value={ingName}
+                      onChange={(e) => setIngName(e.target.value)}
+                      placeholder="Surovina"
+                      className="flex-1 min-w-0 px-2 py-1 bg-[#1a1a1a] border border-gray-700 rounded text-sm text-white placeholder-gray-500 focus:outline-none focus:ring-1 focus:ring-white"
+                    />
+                    <input
+                      type="number"
+                      value={ingAmount}
+                      onChange={(e) => setIngAmount(e.target.value)}
+                      placeholder="Množství"
+                      className="w-20 px-2 py-1 bg-[#1a1a1a] border border-gray-700 rounded text-sm text-white placeholder-gray-500 focus:outline-none focus:ring-1 focus:ring-white"
+                    />
+                    <input
+                      type="text"
+                      value={ingUnit}
+                      onChange={(e) => setIngUnit(e.target.value)}
+                      placeholder="Jednotka"
+                      className="w-20 px-2 py-1 bg-[#1a1a1a] border border-gray-700 rounded text-sm text-white placeholder-gray-500 focus:outline-none focus:ring-1 focus:ring-white"
+                    />
+                    <button
+                      onClick={() => addIngredient(meal.id)}
+                      disabled={ingSubmitting || !ingName.trim()}
+                      className="px-3 py-1 bg-white text-black rounded text-sm hover:bg-gray-200 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      {ingSubmitting ? "..." : "+"}
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
           ))}
         </div>
